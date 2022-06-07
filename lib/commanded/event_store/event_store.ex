@@ -3,10 +3,17 @@ defmodule Commanded.EventStore do
   Defines the behaviour to be implemented by an event store adapter to be used by Commanded.
   """
 
-  alias Commanded.EventStore.{EventData, RecordedEvent, SnapshotData}
+  alias Commanded.EventStore.EventData
+  alias Commanded.EventStore.RecordedEvent
+  alias Commanded.EventStore.SnapshotData
 
   @type stream_uuid :: String.t()
   @type start_from :: :origin | :current | integer
+  @type subscription_option ::
+          {:start_from, start_from}
+          | {:concurrency, pos_integer}
+          | {:partition_by, (RecordedEvent.t() -> term)}
+  @type subscription_options :: [subscription_option]
   @type expected_version :: :any_version | :no_stream | :stream_exists | non_neg_integer
   @type subscription_name :: String.t()
   @type subscription :: any
@@ -81,17 +88,18 @@ defmodule Commanded.EventStore do
   Subscribe to all streams:
 
       {:ok, subscription} =
-        Commanded.EventStore.subscribe_to(:all, "Example", self(), :current)
+        Commanded.EventStore.subscribe_to(:all, "Example", self(), start_from: :current)
 
   Subscribe to a single stream:
 
       {:ok, subscription} =
-        Commanded.EventStore.subscribe_to("stream1", "Example", self(), :origin)
+        Commanded.EventStore.subscribe_to("stream1", "Example", self(), start_from: :origin)
 
   """
-  @callback subscribe_to(stream_uuid | :all, subscription_name, subscriber, start_from) ::
+  @callback subscribe_to(stream_uuid | :all, subscription_name, subscriber, subscription_options) ::
               {:ok, subscription}
-              | {:error, :subscription_already_exists}
+              | {:error, :already_subscribed}
+              | {:error, :too_many_subscribers}
               | {:error, error}
 
   @doc """
@@ -191,13 +199,16 @@ defmodule Commanded.EventStore do
   @doc """
   Create a persistent subscription to an event stream.
   """
-  @spec subscribe_to(stream_uuid | :all, subscription_name, subscriber, start_from) ::
+  @spec subscribe_to(stream_uuid | :all, subscription_name, subscriber, subscription_options) ::
           {:ok, subscription}
-          | {:error, :subscription_already_exists}
+          | {:error, :already_subscribed}
+          | {:error, :too_many_subscribers}
           | {:error, error}
-  def subscribe_to(stream_uuid, subscription_name, subscriber, start_from)
+  def subscribe_to(stream_uuid, subscription_name, subscriber, opts)
       when is_binary(subscription_name) and is_pid(subscriber) do
-    event_store_adapter().subscribe_to(stream_uuid, subscription_name, subscriber, start_from)
+    opts = Keyword.merge([start_from: :origin, concurrency: 1], opts)
+
+    event_store_adapter().subscribe_to(stream_uuid, subscription_name, subscriber, opts)
   end
 
   @doc """
